@@ -1,6 +1,6 @@
 # Video Comparison Tool
 
-A lightweight, browser-based tool for synchronized multi-video comparison. Perfect for research presentations, A/B testing, and side-by-side analysis.
+A lightweight, browser-based tool for synchronized multi-video comparison. Helps presentations, A/B testing, side-by-side analysis, or your choice.
 Made for research use; encouraged to put it onto GitHub.
 
 ## Features
