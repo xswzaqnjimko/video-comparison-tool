@@ -113,6 +113,7 @@
 
             const [isPlaying, setIsPlaying] = useState(false);
             const [autoReplay, setAutoReplay] = useState(true);
+            const [playbackSpeed, setPlaybackSpeed] = useState(1);
             const [currentTime, setCurrentTime] = useState(0);
             const [duration, setDuration] = useState(6);
             const [draggedId, setDraggedId] = useState(null);
@@ -125,6 +126,14 @@
             
             const videoRefs = useRef({});
             const containerRef = useRef(null);
+
+            // Playback speed
+            const handleSpeedChange = (speed) => {
+                setPlaybackSpeed(speed);
+                Object.values(videoRefs.current).forEach(video => {
+                    if (video) video.playbackRate = speed;
+                });
+            };
 
             // Sync all videos
             const syncVideos = useCallback((time) => {
@@ -177,7 +186,10 @@
                     setIsPlaying(false);
                 }
             };
-            const handleLoadedMetadata = (e) => setDuration(e.target.duration || 6);
+            const handleLoadedMetadata = (e) => {
+                setDuration(e.target.duration || 6);
+                e.target.playbackRate = playbackSpeed;
+            };
 
             // Drag handlers
             const handleDragStart = (e, id) => {
@@ -325,6 +337,23 @@
                                 🔁
                                 <span className="hidden sm:inline">{autoReplay ? 'Loop On' : 'Loop Off'}</span>
                             </button>
+
+                            {/* Speed control */}
+                            <div className="flex items-center gap-1" title="Playback speed">
+                                <span className="text-xs text-gray-400 hidden sm:inline">Speed:</span>
+                                <select 
+                                    value={playbackSpeed} 
+                                    onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
+                                    className="bg-gray-700 hover:bg-gray-600 text-white text-sm px-2 py-2 rounded-lg cursor-pointer"
+                                >
+                                    <option value={0.25}>0.25x</option>
+                                    <option value={0.5}>0.5x</option>
+                                    <option value={0.75}>0.75x</option>
+                                    <option value={1}>1x</option>
+                                    <option value={1.5}>1.5x</option>
+                                    <option value={2}>2x</option>
+                                </select>
+                            </div>
 
                             <button onClick={() => setOverlayMode(!overlayMode)} title={overlayMode ? "Overlay mode ON (drag video onto another)" : "Enable overlay mode"}
                                 className={`flex items-center gap-2 px-3 py-2 rounded-lg transition ${
