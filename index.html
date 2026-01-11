@@ -135,6 +135,54 @@
                 });
             };
 
+            // Clear all videos
+            const clearAllVideos = () => {
+                setVideos(prev => prev.map((v, i) => ({ ...createVideoSlot(i), id: v.id })));
+                setOverlayStack([]);
+                setIsPlaying(false);
+                setCurrentTime(0);
+            };
+
+            // Multi-file drop - accepts multiple videos at once
+            const handleMultiFileDrop = (e) => {
+                e.preventDefault();
+                setIsDraggingOver(false);
+                
+                // Ignore if this is a panel reorder drag (no files)
+                if (!e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
+                
+                const files = Array.from(e.dataTransfer.files)
+                    .filter(f => f.type.startsWith('video/'))
+                    .sort((a, b) => a.name.localeCompare(b.name)); // Sort by filename
+                
+                if (files.length === 0) return;
+
+                // Auto-expand panel count if needed
+                const newCount = Math.max(videoCount, Math.min(10, files.length));
+                
+                const newVideos = [];
+                for (let i = 0; i < newCount; i++) {
+                    if (i < files.length) {
+                        const file = files[i];
+                        const url = URL.createObjectURL(file);
+                        const fileName = file.name.replace(/\.[^/.]+$/, "");
+                        newVideos.push({
+                            ...createVideoSlot(i),
+                            src: url,
+                            label: fileName
+                        });
+                    } else {
+                        newVideos.push(createVideoSlot(i));
+                    }
+                }
+                
+                setVideoCount(newCount);
+                setVideos(newVideos);
+                setOverlayStack([]);
+            };
+
+            const [isDraggingOver, setIsDraggingOver] = useState(false);
+
             // Sync all videos
             const syncVideos = useCallback((time) => {
                 Object.values(videoRefs.current).forEach(video => {
@@ -275,16 +323,29 @@
                 }
             };
 
-            // Drag-drop file upload
+            // Drag-drop file upload (single file to specific panel)
             const handleFileDrop = (e, videoId) => {
                 e.preventDefault();
-                e.stopPropagation();
-                const file = e.dataTransfer.files[0];
-                if (file && file.type.startsWith('video/')) {
-                    const url = URL.createObjectURL(file);
-                    const fileName = file.name.replace(/\.[^/.]+$/, "");
-                    setVideos(prev => prev.map(v => v.id === videoId ? { ...v, src: url, label: fileName } : v));
+                
+                // Ignore if no files (this is a panel reorder)
+                if (!e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
+                
+                const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('video/'));
+                
+                // If no video files, ignore
+                if (files.length === 0) return;
+                
+                // If multiple files, use the multi-drop handler
+                if (files.length > 1) {
+                    handleMultiFileDrop(e);
+                    return;
                 }
+                
+                e.stopPropagation();
+                const file = files[0];
+                const url = URL.createObjectURL(file);
+                const fileName = file.name.replace(/\.[^/.]+$/, "");
+                setVideos(prev => prev.map(v => v.id === videoId ? { ...v, src: url, label: fileName } : v));
             };
 
             const handleFileDragOver = (e) => {
@@ -316,8 +377,16 @@
                                 <label className="text-xs text-gray-400">Videos:</label>
                                 <input type="number" min="1" max="10" value={videoCount}
                                     onChange={(e) => handleVideoCountChange(e.target.value)}
-                                    className="w-12 px-2 py-1 bg-gray-700 rounded text-center text-sm" />
+                                    onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                                    className="w-14 px-2 py-1 bg-gray-700 rounded text-center text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                             </div>
+
+                            {/* Clear all videos button */}
+                            <button onClick={clearAllVideos} title="Clear all uploaded videos"
+                                className="flex items-center gap-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition text-sm">
+                                🗑️
+                                <span className="hidden sm:inline">Clear All</span>
+                            </button>
 
                             <button onClick={togglePlayPause} title={isPlaying ? "Pause all videos" : "Play all videos"}
                                 className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition font-medium">
@@ -392,8 +461,40 @@
                             </div>
                         </div>
 
-                        {/* Video Grid */}
-                        <div className={`grid gap-4 ${
+                        {/* Video Grid - Drop zone for multiple files */}
+                        <div 
+                            className={`relative rounded-xl transition-all ${isDraggingOver ? 'ring-4 ring-blue-500 ring-opacity-70' : ''}`}
+                            onDrop={(e) => {
+                                // Only handle if dropping files, not panel reordering
+                                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                                    handleMultiFileDrop(e);
+                                }
+                                setIsDraggingOver(false);
+                            }}
+                            onDragOver={(e) => { 
+                                e.preventDefault(); 
+                                // Only show drop zone indicator for file drops, not panel drags
+                                if (e.dataTransfer.types.includes('Files')) {
+                                    setIsDraggingOver(true); 
+                                }
+                            }}
+                            onDragLeave={(e) => {
+                                // Only reset if leaving the container entirely
+                                if (!e.currentTarget.contains(e.relatedTarget)) {
+                                    setIsDraggingOver(false);
+                                }
+                            }}
+                        >
+                            {isDraggingOver && (
+                                <div className="absolute inset-0 bg-blue-500/20 backdrop-blur-sm z-30 flex items-center justify-center rounded-xl">
+                                    <div className="text-center text-white">
+                                        <div className="text-4xl mb-2">📁</div>
+                                        <div className="text-xl font-bold">Drop videos here</div>
+                                        <div className="text-sm text-blue-200">Multiple files supported • Sorted by filename</div>
+                                    </div>
+                                </div>
+                            )}
+                            <div className={`grid gap-4 ${
                             displayedVideos.length === 1 ? 'grid-cols-1 max-w-2xl mx-auto' :
                             displayedVideos.length === 2 ? 'grid-cols-1 md:grid-cols-2' :
                             displayedVideos.length <= 4 ? 'grid-cols-2' :
@@ -469,6 +570,7 @@
                                     </div>
                                 );
                             })}
+                        </div>
                         </div>
 
                         {/* Hover Tooltip */}

@@ -1,7 +1,7 @@
 # Video Comparison Tool
 
 A lightweight, browser-based tool for synchronized multi-video comparison. Perfect for research presentations, A/B testing, and side-by-side analysis.
-Created using Claude Opus 4.5.
+Made for research use; encouraged to put it onto GitHub.
 
 ## Features
 
@@ -27,15 +27,25 @@ Created using Claude Opus 4.5.
 
 | Button | Function |
 |--------|----------|
+| Videos: [1-10] | Set number of comparison panels (type directly) |
+| 🗑️ Clear All | Remove all uploaded videos |
 | ▶️ Play/Pause | Start/stop all videos simultaneously |
 | 🔄 Reset | Return all videos to beginning |
 | 🔁 Loop | Toggle auto-replay on/off |
+| Speed | Playback speed (0.25x - 2x) |
 | 📑 Overlay | Enable overlay mode for stacking videos |
 | 🔲 Clear | Remove all overlays |
 
+### Bulk Upload
+
+Drag multiple video files at once onto the video grid area. Videos will be:
+- Automatically sorted by filename
+- Panel count auto-expands to fit (up to 10)
+- You can still rearrange after upload
+
 ### Video Count
 
-Adjust the "Videos" number input (1-10) to add or remove comparison panels.
+Adjust (input or click) the "Videos" number input (1-10) to add or remove comparison panels.
 
 ### Rearranging Videos
 
@@ -52,7 +62,7 @@ Simply drag any video panel and drop it onto another to swap positions.
 ### Hover Data
 
 Hover over any video to see synchronized data labels for all videos at that position.
-*Still working.
+*Still working. Currently showing mock data.
 
 ## Hosting
 
