@@ -11,13 +11,20 @@
     <style>
         * { box-sizing: border-box; }
         body { margin: 0; font-family: system-ui, -apple-system, sans-serif; }
+        .video-layer {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
     </style>
 </head>
 <body>
     <div id="root"></div>
     
     <script type="text/babel">
-        const { useState, useRef, useCallback } = React;
+        const { useState, useRef, useCallback, useEffect, useMemo } = React;
 
         // Icons as simple SVG components
         const PlayIcon = () => (
@@ -52,29 +59,29 @@
                 <rect x="3" y="14" width="7" height="7"></rect>
             </svg>
         );
-
-        // ============================================
-        // MOCK DATA - REPLACE WITH YOUR ACTUAL DATA
-        // ============================================
-        const generateMockData = (videoType, frameTime, ringPosition) => {
-            const baseIndex = Math.sin(frameTime * 0.5 + ringPosition * 0.1) * 3 + 3;
-            const variations = {
-                'Simulation': 0,
-                'Real Physics': Math.sin(frameTime * 2) * 0.2,
-                'Reconstruction': Math.sin(frameTime * 1.5) * 0.15,
-                'Low Frequency': Math.sin(frameTime * 0.3) * 0.1
-            };
-            return {
-                index: (baseIndex + (variations[videoType] || 0)).toFixed(3),
-                time: frameTime.toFixed(2) + 's',
-                position: (ringPosition * 360 / 100).toFixed(1) + '°'
-            };
-        };
+        const FullscreenIcon = () => (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <polyline points="9 21 3 21 3 15"></polyline>
+                <line x1="21" y1="3" x2="14" y2="10"></line>
+                <line x1="3" y1="21" x2="10" y2="14"></line>
+            </svg>
+        );
+        const ExitFullscreenIcon = () => (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="4 14 10 14 10 20"></polyline>
+                <polyline points="20 10 14 10 14 4"></polyline>
+                <line x1="14" y1="10" x2="21" y2="3"></line>
+                <line x1="3" y1="21" x2="10" y2="14"></line>
+            </svg>
+        );
+        const FlickerIcon = () => (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+            </svg>
+        );
 
         const VideoComparisonWidget = () => {
-            // ============================================
-            // VIDEO CONFIGURATION
-            // ============================================
             const videoColors = [
                 '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', 
                 '#ef4444', '#06b6d4', '#ec4899', '#84cc16',
@@ -90,86 +97,117 @@
 
             const [videoCount, setVideoCount] = useState(2);
             const [videos, setVideos] = useState([createVideoSlot(0), createVideoSlot(1)]);
-            
-            // Update videos when count changes
-            const handleVideoCountChange = (newCount) => {
-                const count = Math.max(1, Math.min(10, parseInt(newCount) || 2));
-                setVideoCount(count);
-                setVideos(prev => {
-                    const newVideos = [];
-                    for (let i = 0; i < count; i++) {
-                        const existing = prev[i];
-                        if (existing) {
-                            newVideos.push(existing);
-                        } else {
-                            newVideos.push(createVideoSlot(i));
-                        }
-                    }
-                    return newVideos;
-                });
-                // Clear overlays when changing video count
-                setOverlayStack([]);
-            };
-
             const [isPlaying, setIsPlaying] = useState(false);
             const [autoReplay, setAutoReplay] = useState(true);
             const [playbackSpeed, setPlaybackSpeed] = useState(1);
+            const [showNameTags, setShowNameTags] = useState(true);
+            const [fullscreenVideoId, setFullscreenVideoId] = useState(null);
             const [currentTime, setCurrentTime] = useState(0);
             const [duration, setDuration] = useState(6);
             const [draggedId, setDraggedId] = useState(null);
             const [dropTargetId, setDropTargetId] = useState(null);
             const [overlayMode, setOverlayMode] = useState(false);
             const [overlayStack, setOverlayStack] = useState([]);
-            const [hoverData, setHoverData] = useState(null);
-            const [hoverPosition, setHoverPosition] = useState({ x: 0, y: 0 });
-            const [overlayOpacity, setOverlayOpacity] = useState(0.5);
+            const [overlayOpacity, setOverlayOpacity] = useState(1);
+            const [isDraggingOver, setIsDraggingOver] = useState(false);
+            
+            // Use ref for isOverlayOnTop to avoid re-renders during toggle
+            const [isOverlayOnTop, setIsOverlayOnTop] = useState(true);
+            
+            // Flicker mode
+            const [flickerMode, setFlickerMode] = useState(false);
+            const [flickerInterval, setFlickerInterval] = useState(0.5);
+            const [flickerInputValue, setFlickerInputValue] = useState('0.5');
+            const flickerTimerRef = useRef(null);
+            
+            const [fullscreenOverlay, setFullscreenOverlay] = useState(null);
             
             const videoRefs = useRef({});
             const containerRef = useRef(null);
 
-            // Playback speed
-            const handleSpeedChange = (speed) => {
-                setPlaybackSpeed(speed);
-                Object.values(videoRefs.current).forEach(video => {
-                    if (video) video.playbackRate = speed;
+            const handleVideoCountChange = (newCount) => {
+                const count = Math.max(1, Math.min(10, parseInt(newCount) || 2));
+                setVideoCount(count);
+                setVideos(prev => {
+                    const newVideos = [];
+                    for (let i = 0; i < count; i++) {
+                        newVideos.push(prev[i] || createVideoSlot(i));
+                    }
+                    return newVideos;
                 });
+                setOverlayStack([]);
             };
 
-            // Clear all videos
+            // Flicker effect using setInterval - only toggles a boolean, minimal re-render
+            useEffect(() => {
+                if (flickerMode && overlayStack.length > 0) {
+                    flickerTimerRef.current = setInterval(() => {
+                        setIsOverlayOnTop(prev => !prev);
+                    }, flickerInterval * 1000);
+                }
+                return () => {
+                    if (flickerTimerRef.current) {
+                        clearInterval(flickerTimerRef.current);
+                        flickerTimerRef.current = null;
+                    }
+                };
+            }, [flickerMode, flickerInterval, overlayStack.length]);
+
+            useEffect(() => {
+                if (overlayStack.length === 0) {
+                    setFlickerMode(false);
+                    setIsOverlayOnTop(true);
+                }
+            }, [overlayStack.length]);
+
+            const handleFlickerIntervalChange = (value) => {
+                setFlickerInputValue(value);
+                const numValue = parseFloat(value);
+                if (!isNaN(numValue)) {
+                    setFlickerInterval(Math.max(0.1, Math.min(duration, numValue)));
+                }
+            };
+
+            const handleFlickerIntervalBlur = () => {
+                const numValue = parseFloat(flickerInputValue);
+                const clampedValue = isNaN(numValue) ? flickerInterval : Math.max(0.1, Math.min(duration, numValue));
+                setFlickerInterval(clampedValue);
+                setFlickerInputValue(clampedValue.toString());
+            };
+
+            const handleSpeedChange = (speed) => {
+                setPlaybackSpeed(speed);
+                Object.values(videoRefs.current).forEach(v => { if (v) v.playbackRate = speed; });
+            };
+
             const clearAllVideos = () => {
                 setVideos(prev => prev.map((v, i) => ({ ...createVideoSlot(i), id: v.id })));
                 setOverlayStack([]);
                 setIsPlaying(false);
                 setCurrentTime(0);
+                setFlickerMode(false);
             };
 
-            // Multi-file drop - accepts multiple videos at once
             const handleMultiFileDrop = (e) => {
                 e.preventDefault();
                 setIsDraggingOver(false);
-                
-                // Ignore if this is a panel reorder drag (no files)
                 if (!e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
                 
                 const files = Array.from(e.dataTransfer.files)
                     .filter(f => f.type.startsWith('video/'))
-                    .sort((a, b) => a.name.localeCompare(b.name)); // Sort by filename
+                    .sort((a, b) => a.name.localeCompare(b.name));
                 
                 if (files.length === 0) return;
 
-                // Auto-expand panel count if needed
                 const newCount = Math.max(videoCount, Math.min(10, files.length));
-                
                 const newVideos = [];
                 for (let i = 0; i < newCount; i++) {
                     if (i < files.length) {
                         const file = files[i];
-                        const url = URL.createObjectURL(file);
-                        const fileName = file.name.replace(/\.[^/.]+$/, "");
                         newVideos.push({
                             ...createVideoSlot(i),
-                            src: url,
-                            label: fileName
+                            src: URL.createObjectURL(file),
+                            label: file.name.replace(/\.[^/.]+$/, "")
                         });
                     } else {
                         newVideos.push(createVideoSlot(i));
@@ -181,77 +219,72 @@
                 setOverlayStack([]);
             };
 
-            const [isDraggingOver, setIsDraggingOver] = useState(false);
-
-            // Sync all videos
             const syncVideos = useCallback((time) => {
-                Object.values(videoRefs.current).forEach(video => {
-                    if (video && Math.abs(video.currentTime - time) > 0.05) {
-                        video.currentTime = time;
+                Object.values(videoRefs.current).forEach(v => {
+                    if (v && Math.abs(v.currentTime - time) > 0.05) v.currentTime = time;
+                });
+            }, []);
+
+            const togglePlayPause = useCallback(() => {
+                setIsPlaying(prev => {
+                    const newState = !prev;
+                    Object.values(videoRefs.current).forEach(v => {
+                        if (v) newState ? v.play().catch(() => {}) : v.pause();
+                    });
+                    return newState;
+                });
+            }, []);
+
+            const resetVideos = useCallback(() => {
+                setIsPlaying(false);
+                setCurrentTime(0);
+                Object.values(videoRefs.current).forEach(v => {
+                    if (v) { v.pause(); v.currentTime = 0; }
+                });
+            }, []);
+
+            // Throttled time update
+            const lastUpdateRef = useRef(0);
+            const handleTimeUpdate = useCallback((e) => {
+                const time = e.target.currentTime;
+                const now = Date.now();
+                if (now - lastUpdateRef.current > 200) {
+                    lastUpdateRef.current = now;
+                    setCurrentTime(time);
+                }
+                // Sync other videos
+                Object.entries(videoRefs.current).forEach(([id, v]) => {
+                    if (v && v !== e.target && Math.abs(v.currentTime - time) > 0.1) {
+                        v.currentTime = time;
                     }
                 });
             }, []);
 
-            // Play/Pause
-            const togglePlayPause = () => {
-                const newIsPlaying = !isPlaying;
-                setIsPlaying(newIsPlaying);
-                Object.values(videoRefs.current).forEach(video => {
-                    if (video) {
-                        newIsPlaying ? video.play().catch(() => {}) : video.pause();
-                    }
-                });
-            };
-
-            // Reset
-            const resetVideos = () => {
-                setIsPlaying(false);
-                setCurrentTime(0);
-                Object.values(videoRefs.current).forEach(video => {
-                    if (video) { video.pause(); video.currentTime = 0; }
-                });
-            };
-
-            // Time update
-            const handleTimeUpdate = (e) => {
-                const time = e.target.currentTime;
-                setCurrentTime(time);
-                Object.entries(videoRefs.current).forEach(([id, video]) => {
-                    if (video && video !== e.target && Math.abs(video.currentTime - time) > 0.1) {
-                        video.currentTime = time;
-                    }
-                });
-            };
-
-            const handleVideoEnded = () => {
+            const handleVideoEnded = useCallback(() => {
                 if (autoReplay) {
-                    // Reset all videos to start and keep playing
-                    Object.values(videoRefs.current).forEach(video => {
-                        if (video) { video.currentTime = 0; video.play().catch(() => {}); }
+                    Object.values(videoRefs.current).forEach(v => {
+                        if (v) { v.currentTime = 0; v.play().catch(() => {}); }
                     });
                     setCurrentTime(0);
                 } else {
                     setIsPlaying(false);
                 }
-            };
-            const handleLoadedMetadata = (e) => {
+            }, [autoReplay]);
+
+            const handleLoadedMetadata = useCallback((e) => {
                 setDuration(e.target.duration || 6);
                 e.target.playbackRate = playbackSpeed;
-            };
+            }, [playbackSpeed]);
 
-            // Drag handlers
             const handleDragStart = (e, id) => {
                 setDraggedId(id);
                 e.dataTransfer.effectAllowed = 'move';
             };
-
             const handleDragOver = (e, id) => {
                 e.preventDefault();
                 if (draggedId && draggedId !== id) setDropTargetId(id);
             };
-
             const handleDragLeave = () => setDropTargetId(null);
-
             const handleDrop = (e, targetId) => {
                 e.preventDefault();
                 if (!draggedId || draggedId === targetId) {
@@ -259,195 +292,148 @@
                     setDropTargetId(null);
                     return;
                 }
-
                 if (overlayMode) {
-                    setOverlayStack(prev => {
-                        const filtered = prev.filter(o => o.overlayId !== draggedId);
-                        return [...filtered, { baseId: targetId, overlayId: draggedId }];
-                    });
+                    setOverlayStack([{ baseId: targetId, overlayId: draggedId }]);
+                    setIsOverlayOnTop(true);
                 } else {
                     const newVideos = [...videos];
-                    const draggedIndex = newVideos.findIndex(v => v.id === draggedId);
-                    const targetIndex = newVideos.findIndex(v => v.id === targetId);
-                    const [removed] = newVideos.splice(draggedIndex, 1);
-                    newVideos.splice(targetIndex, 0, removed);
+                    const di = newVideos.findIndex(v => v.id === draggedId);
+                    const ti = newVideos.findIndex(v => v.id === targetId);
+                    const [removed] = newVideos.splice(di, 1);
+                    newVideos.splice(ti, 0, removed);
                     setVideos(newVideos);
                 }
                 setDraggedId(null);
                 setDropTargetId(null);
             };
-
             const handleDragEnd = () => { setDraggedId(null); setDropTargetId(null); };
-            const clearOverlays = () => setOverlayStack([]);
+            const clearOverlays = () => { setOverlayStack([]); setFlickerMode(false); };
 
-            // Progress bar
             const handleProgressClick = (e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
-                const x = (e.clientX - rect.left) / rect.width;
-                const newTime = x * duration;
+                const newTime = ((e.clientX - rect.left) / rect.width) * duration;
                 setCurrentTime(newTime);
                 syncVideos(newTime);
             };
 
-            // Hover
-            const handleMouseMove = (e, videoId) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                const x = (e.clientX - rect.left) / rect.width;
-                const y = (e.clientY - rect.top) / rect.height;
-                const centerX = 0.5, centerY = 0.5;
-                const angle = Math.atan2(y - centerY, x - centerX);
-                const ringPosition = ((angle + Math.PI) / (2 * Math.PI)) * 100;
-
-                const allData = videos.map(video => ({
-                    label: video.label,
-                    color: video.color,
-                    data: generateMockData(video.label, currentTime, ringPosition)
-                }));
-                setHoverData(allData);
-                const containerRect = containerRef.current.getBoundingClientRect();
-                setHoverPosition({ 
-                    x: e.clientX - containerRect.left,
-                    y: e.clientY - containerRect.top
-                });
-            };
-
-            const handleMouseLeave = () => setHoverData(null);
-
-            // File upload - use filename as label
             const handleFileUpload = (e, videoId) => {
                 const file = e.target.files[0];
                 if (file) {
-                    const url = URL.createObjectURL(file);
-                    const fileName = file.name.replace(/\.[^/.]+$/, ""); // Remove extension
-                    setVideos(prev => prev.map(v => v.id === videoId ? { ...v, src: url, label: fileName } : v));
+                    setVideos(prev => prev.map(v => v.id === videoId 
+                        ? { ...v, src: URL.createObjectURL(file), label: file.name.replace(/\.[^/.]+$/, "") } 
+                        : v
+                    ));
                 }
             };
 
-            // Drag-drop file upload (single file to specific panel)
             const handleFileDrop = (e, videoId) => {
                 e.preventDefault();
-                
-                // Ignore if no files (this is a panel reorder)
                 if (!e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
-                
                 const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('video/'));
-                
-                // If no video files, ignore
                 if (files.length === 0) return;
-                
-                // If multiple files, use the multi-drop handler
-                if (files.length > 1) {
-                    handleMultiFileDrop(e);
-                    return;
-                }
-                
+                if (files.length > 1) { handleMultiFileDrop(e); return; }
                 e.stopPropagation();
                 const file = files[0];
-                const url = URL.createObjectURL(file);
-                const fileName = file.name.replace(/\.[^/.]+$/, "");
-                setVideos(prev => prev.map(v => v.id === videoId ? { ...v, src: url, label: fileName } : v));
+                setVideos(prev => prev.map(v => v.id === videoId 
+                    ? { ...v, src: URL.createObjectURL(file), label: file.name.replace(/\.[^/.]+$/, "") }
+                    : v
+                ));
             };
 
-            const handleFileDragOver = (e) => {
-                e.preventDefault();
+            const getOverlayInfo = useCallback((videoId) => overlayStack.find(o => o.baseId === videoId), [overlayStack]);
+            const isUsedAsOverlay = useCallback((videoId) => overlayStack.some(o => o.overlayId === videoId), [overlayStack]);
+            const displayedVideos = useMemo(() => videos.filter(v => !isUsedAsOverlay(v.id)), [videos, isUsedAsOverlay]);
+
+            const handleOverlayClick = useCallback((e) => {
                 e.stopPropagation();
-            };
-
-            const getOverlayInfo = (videoId) => overlayStack.find(o => o.baseId === videoId);
-            const isUsedAsOverlay = (videoId) => overlayStack.some(o => o.overlayId === videoId);
-            const displayedVideos = videos.filter(v => !isUsedAsOverlay(v.id));
+                if (!flickerMode) setIsOverlayOnTop(prev => !prev);
+            }, [flickerMode]);
 
             return (
                 <div className="min-h-screen bg-gray-900 text-white p-4 md:p-6" ref={containerRef}>
                     <div className="max-w-6xl mx-auto">
-                        {/* Header */}
                         <div className="mb-4">
                             <h1 className="text-xl md:text-2xl font-bold mb-1">🎬 Video Comparison Tool</h1>
                             <p className="text-gray-400 text-sm">
-                                {overlayMode 
-                                    ? '🎯 Overlay Mode ON: Drag a video onto another' 
-                                    : '↔️ Drag to rearrange • Enable Overlay Mode to compare'}
+                                {overlayMode ? '🎯 Overlay Mode ON: Drag a video onto another (max 2 videos)' : '↔️ Drag to rearrange • Enable Overlay Mode to compare'}
                             </p>
                         </div>
 
-                        {/* Controls */}
                         <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-4 bg-gray-800 p-3 rounded-lg">
-                            {/* Video count selector */}
                             <div className="flex items-center gap-2 pr-3 border-r border-gray-600">
                                 <label className="text-xs text-gray-400">Videos:</label>
                                 <input type="number" min="1" max="10" value={videoCount}
                                     onChange={(e) => handleVideoCountChange(e.target.value)}
-                                    onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
-                                    className="w-14 px-2 py-1 bg-gray-700 rounded text-center text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    className="w-14 px-2 py-1 bg-gray-700 rounded text-center text-sm" />
                             </div>
 
-                            {/* Clear all videos button */}
-                            <button onClick={clearAllVideos} title="Clear all uploaded videos"
-                                className="flex items-center gap-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition text-sm">
-                                🗑️
-                                <span className="hidden sm:inline">Clear All</span>
+                            <button onClick={clearAllVideos} className="flex items-center gap-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm">
+                                🗑️<span className="hidden sm:inline">Clear All</span>
                             </button>
 
-                            <button onClick={togglePlayPause} title={isPlaying ? "Pause all videos" : "Play all videos"}
-                                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition font-medium">
+                            <button onClick={togglePlayPause} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium">
                                 {isPlaying ? <PauseIcon /> : <PlayIcon />}
                                 <span className="hidden sm:inline">{isPlaying ? 'Pause' : 'Play'}</span>
                             </button>
                             
-                            <button onClick={resetVideos} title="Reset to beginning"
-                                className="flex items-center gap-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition">
+                            <button onClick={resetVideos} className="flex items-center gap-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg">
                                 <ResetIcon />
                             </button>
 
-                            <button onClick={() => setAutoReplay(!autoReplay)} title={autoReplay ? "Auto-replay is ON (click to disable)" : "Auto-replay is OFF (click to enable)"}
-                                className={`flex items-center gap-1 px-3 py-2 rounded-lg transition text-sm ${
-                                    autoReplay ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-700 hover:bg-gray-600'
-                                }`}>
-                                🔁
-                                <span className="hidden sm:inline">{autoReplay ? 'Loop On' : 'Loop Off'}</span>
+                            <button onClick={() => setAutoReplay(!autoReplay)}
+                                className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm ${autoReplay ? 'bg-green-600' : 'bg-gray-700'}`}>
+                                🔁<span className="hidden sm:inline">{autoReplay ? 'Loop On' : 'Loop Off'}</span>
                             </button>
 
-                            {/* Speed control */}
-                            <div className="flex items-center gap-1" title="Playback speed">
-                                <span className="text-xs text-gray-400 hidden sm:inline">Speed:</span>
-                                <select 
-                                    value={playbackSpeed} 
-                                    onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
-                                    className="bg-gray-700 hover:bg-gray-600 text-white text-sm px-2 py-2 rounded-lg cursor-pointer"
-                                >
-                                    <option value={0.25}>0.25x</option>
-                                    <option value={0.5}>0.5x</option>
-                                    <option value={0.75}>0.75x</option>
-                                    <option value={1}>1x</option>
-                                    <option value={1.5}>1.5x</option>
-                                    <option value={2}>2x</option>
-                                </select>
-                            </div>
+                            <select value={playbackSpeed} onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
+                                className="bg-gray-700 text-white text-sm px-2 py-2 rounded-lg">
+                                <option value={0.25}>0.25x</option>
+                                <option value={0.5}>0.5x</option>
+                                <option value={0.75}>0.75x</option>
+                                <option value={1}>1x</option>
+                                <option value={1.5}>1.5x</option>
+                                <option value={2}>2x</option>
+                            </select>
 
-                            <button onClick={() => setOverlayMode(!overlayMode)} title={overlayMode ? "Overlay mode ON (drag video onto another)" : "Enable overlay mode"}
-                                className={`flex items-center gap-2 px-3 py-2 rounded-lg transition ${
-                                    overlayMode ? 'bg-purple-600 ring-2 ring-purple-400' : 'bg-gray-700 hover:bg-gray-600'
-                                }`}>
-                                <LayersIcon />
-                                <span className="hidden sm:inline">Overlay</span>
+                            <button onClick={() => setShowNameTags(!showNameTags)}
+                                className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm ${showNameTags ? 'bg-cyan-600' : 'bg-gray-700'}`}>
+                                🏷️<span className="hidden sm:inline">{showNameTags ? 'Tags On' : 'Tags Off'}</span>
+                            </button>
+
+                            <button onClick={() => setOverlayMode(!overlayMode)}
+                                className={`flex items-center gap-2 px-3 py-2 rounded-lg ${overlayMode ? 'bg-purple-600 ring-2 ring-purple-400' : 'bg-gray-700'}`}>
+                                <LayersIcon /><span className="hidden sm:inline">Overlay</span>
                             </button>
 
                             {overlayStack.length > 0 && (
                                 <>
-                                    <button onClick={clearOverlays} title="Clear all overlays"
-                                        className="flex items-center gap-2 px-3 py-2 bg-red-600 hover:bg-red-700 rounded-lg transition">
+                                    <button onClick={clearOverlays} className="flex items-center gap-2 px-3 py-2 bg-red-600 hover:bg-red-700 rounded-lg">
                                         <GridIcon />
                                     </button>
-                                    <div className="flex items-center gap-2" title="Adjust overlay transparency">
+                                    <div className="flex items-center gap-2">
                                         <span className="text-xs text-gray-400">Opacity:</span>
-                                        <input type="range" min="0.2" max="0.8" step="0.1" value={overlayOpacity}
-                                            onChange={(e) => setOverlayOpacity(parseFloat(e.target.value))}
-                                            className="w-16 md:w-24" />
+                                        <input type="range" min="0" max="1" step="0.1" value={overlayOpacity}
+                                            onChange={(e) => setOverlayOpacity(parseFloat(e.target.value))} className="w-16 md:w-24" />
+                                        <span className="text-xs text-gray-300 w-8">{overlayOpacity.toFixed(1)}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 pl-2 border-l border-gray-600">
+                                        <button onClick={() => setFlickerMode(!flickerMode)}
+                                            className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm ${flickerMode ? 'bg-yellow-600' : 'bg-gray-700'}`}>
+                                            <FlickerIcon /><span className="hidden sm:inline">Flicker</span>
+                                        </button>
+                                        {flickerMode && (
+                                            <div className="flex items-center gap-1">
+                                                <input type="number" min="0.1" max={duration} step="0.1" value={flickerInputValue}
+                                                    onChange={(e) => handleFlickerIntervalChange(e.target.value)}
+                                                    onBlur={handleFlickerIntervalBlur}
+                                                    className="w-16 px-2 py-1 bg-gray-700 rounded text-center text-sm" />
+                                                <span className="text-xs text-gray-400">sec</span>
+                                            </div>
+                                        )}
                                     </div>
                                 </>
                             )}
 
-                            {/* Progress */}
                             <div className="flex-1 min-w-[120px] ml-auto">
                                 <div className="h-3 bg-gray-700 rounded-full cursor-pointer relative" onClick={handleProgressClick}>
                                     <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(currentTime / duration) * 100}%` }} />
@@ -461,99 +447,102 @@
                             </div>
                         </div>
 
-                        {/* Video Grid - Drop zone for multiple files */}
-                        <div 
-                            className={`relative rounded-xl transition-all ${isDraggingOver ? 'ring-4 ring-blue-500 ring-opacity-70' : ''}`}
-                            onDrop={(e) => {
-                                // Only handle if dropping files, not panel reordering
-                                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                                    handleMultiFileDrop(e);
-                                }
-                                setIsDraggingOver(false);
-                            }}
-                            onDragOver={(e) => { 
-                                e.preventDefault(); 
-                                // Only show drop zone indicator for file drops, not panel drags
-                                if (e.dataTransfer.types.includes('Files')) {
-                                    setIsDraggingOver(true); 
-                                }
-                            }}
-                            onDragLeave={(e) => {
-                                // Only reset if leaving the container entirely
-                                if (!e.currentTarget.contains(e.relatedTarget)) {
-                                    setIsDraggingOver(false);
-                                }
-                            }}
-                        >
+                        <div className={`relative rounded-xl ${isDraggingOver ? 'ring-4 ring-blue-500' : ''}`}
+                            onDrop={(e) => { if (e.dataTransfer.files?.length > 0) handleMultiFileDrop(e); setIsDraggingOver(false); }}
+                            onDragOver={(e) => { e.preventDefault(); if (e.dataTransfer.types.includes('Files')) setIsDraggingOver(true); }}
+                            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setIsDraggingOver(false); }}>
+                            
                             {isDraggingOver && (
                                 <div className="absolute inset-0 bg-blue-500/20 backdrop-blur-sm z-30 flex items-center justify-center rounded-xl">
                                     <div className="text-center text-white">
                                         <div className="text-4xl mb-2">📁</div>
                                         <div className="text-xl font-bold">Drop videos here</div>
-                                        <div className="text-sm text-blue-200">Multiple files supported • Sorted by filename</div>
                                     </div>
                                 </div>
                             )}
+                            
                             <div className={`grid gap-4 ${
-                            displayedVideos.length === 1 ? 'grid-cols-1 max-w-2xl mx-auto' :
-                            displayedVideos.length === 2 ? 'grid-cols-1 md:grid-cols-2' :
-                            displayedVideos.length <= 4 ? 'grid-cols-2' :
-                            displayedVideos.length <= 6 ? 'grid-cols-2 md:grid-cols-3' :
-                            'grid-cols-2 md:grid-cols-3 lg:grid-cols-4'
-                        }`}>
+                                displayedVideos.length === 1 ? 'grid-cols-1 max-w-2xl mx-auto' :
+                                displayedVideos.length === 2 ? 'grid-cols-1 md:grid-cols-2' :
+                                displayedVideos.length <= 4 ? 'grid-cols-2' :
+                                displayedVideos.length <= 6 ? 'grid-cols-2 md:grid-cols-3' :
+                                'grid-cols-2 md:grid-cols-3 lg:grid-cols-4'
+                            }`}>
                             {displayedVideos.map((video) => {
                                 const overlayInfo = getOverlayInfo(video.id);
                                 const overlayVideo = overlayInfo ? videos.find(v => v.id === overlayInfo.overlayId) : null;
+                                const hasOverlay = overlayVideo?.src && video.src;
+                                const topVideoName = hasOverlay ? (isOverlayOnTop ? overlayVideo.label : video.label) : video.label;
                                 
                                 return (
-                                    <div key={video.id} draggable
-                                        onDragStart={(e) => handleDragStart(e, video.id)}
+                                    <div key={video.id} draggable={!hasOverlay}
+                                        onDragStart={(e) => !hasOverlay && handleDragStart(e, video.id)}
                                         onDragOver={(e) => handleDragOver(e, video.id)}
                                         onDragLeave={handleDragLeave}
                                         onDrop={(e) => handleDrop(e, video.id)}
                                         onDragEnd={handleDragEnd}
-                                        className={`relative rounded-xl overflow-hidden transition-all duration-200 cursor-move
+                                        className={`relative rounded-xl overflow-hidden ${!hasOverlay ? 'cursor-move' : 'cursor-pointer'}
                                             ${dropTargetId === video.id ? 'ring-4 ring-purple-500 scale-[1.02]' : ''}
                                             ${draggedId === video.id ? 'opacity-50 scale-95' : ''}
                                             ${overlayMode ? 'ring-2 ring-purple-400/50' : ''}`}
-                                        style={{ borderColor: video.color, borderWidth: '3px', borderStyle: 'solid',
-                                            boxShadow: `0 4px 20px ${video.color}33` }}>
+                                        style={{ borderColor: video.color, borderWidth: '3px', borderStyle: 'solid' }}>
                                         
-                                        {/* Labels */}
-                                        <div className="absolute top-3 left-3 z-20 px-3 py-1.5 rounded-full text-sm font-bold shadow-lg"
-                                            style={{ backgroundColor: video.color }}>
-                                            {video.label}
-                                        </div>
-                                        {overlayVideo && (
-                                            <div className="absolute top-3 right-3 z-20 px-3 py-1.5 rounded-full text-sm font-bold shadow-lg flex items-center gap-1"
-                                                style={{ backgroundColor: overlayVideo.color }}>
-                                                <LayersIcon /> {overlayVideo.label}
+                                        {showNameTags && !hasOverlay && (
+                                            <div className="absolute top-3 left-3 z-20 px-3 py-1.5 rounded-full text-sm font-bold shadow-lg"
+                                                style={{ backgroundColor: video.color }}>
+                                                {video.label}
+                                            </div>
+                                        )}
+                                        
+                                        <button onClick={(e) => { 
+                                            e.stopPropagation(); 
+                                            if (hasOverlay) {
+                                                setFullscreenOverlay({ baseId: video.id, overlayId: overlayVideo.id, baseVideo: video, overlayVideo });
+                                            } else {
+                                                setFullscreenVideoId(video.id);
+                                            }
+                                        }} className="absolute top-3 right-3 z-20 p-2 rounded-full bg-gray-800/80 hover:bg-gray-700">
+                                            <FullscreenIcon />
+                                        </button>
+                                        
+                                        {hasOverlay && (
+                                            <div className="absolute top-3 left-3 z-20 px-2 py-1 rounded text-xs font-bold bg-gray-800/90">
+                                                Click to swap • {flickerMode ? 'Flickering' : 'Top'}: {topVideoName}
                                             </div>
                                         )}
 
-                                        {/* Video */}
                                         <div className="aspect-video bg-gray-800 relative"
-                                            onMouseMove={(e) => handleMouseMove(e, video.id)}
-                                            onMouseLeave={handleMouseLeave}>
+                                            onClick={hasOverlay ? handleOverlayClick : undefined}>
                                             {video.src ? (
-                                                <>
-                                                    <video ref={el => videoRefs.current[video.id] = el} src={video.src}
+                                                hasOverlay ? (
+                                                    <div className="relative w-full h-full overflow-hidden bg-black">
+                                                        <video 
+                                                            ref={el => { if (el) videoRefs.current[video.id] = el; }}
+                                                            src={video.src}
+                                                            className="video-layer"
+                                                            style={{ zIndex: isOverlayOnTop ? 1 : 2, opacity: isOverlayOnTop ? 1 : overlayOpacity }}
+                                                            onTimeUpdate={handleTimeUpdate}
+                                                            onEnded={handleVideoEnded}
+                                                            onLoadedMetadata={handleLoadedMetadata}
+                                                            muted playsInline />
+                                                        <video 
+                                                            ref={el => { if (el) videoRefs.current[overlayVideo.id] = el; }}
+                                                            src={overlayVideo.src}
+                                                            className="video-layer"
+                                                            style={{ zIndex: isOverlayOnTop ? 2 : 1, opacity: isOverlayOnTop ? overlayOpacity : 1 }}
+                                                            muted playsInline />
+                                                    </div>
+                                                ) : (
+                                                    <video ref={el => { if (el) videoRefs.current[video.id] = el; }} src={video.src}
                                                         className="w-full h-full object-contain bg-black"
                                                         onTimeUpdate={handleTimeUpdate} onEnded={handleVideoEnded}
                                                         onLoadedMetadata={handleLoadedMetadata} muted playsInline />
-                                                    {overlayVideo?.src && (
-                                                        <video ref={el => videoRefs.current[overlayVideo.id] = el}
-                                                            src={overlayVideo.src}
-                                                            className="absolute inset-0 w-full h-full object-contain"
-                                                            style={{ opacity: overlayOpacity, mixBlendMode: 'screen' }}
-                                                            muted playsInline />
-                                                    )}
-                                                </>
+                                                )
                                             ) : (
-                                                <label className="flex flex-col items-center justify-center h-full cursor-pointer hover:bg-gray-700/50 transition"
+                                                <label className="flex flex-col items-center justify-center h-full cursor-pointer hover:bg-gray-700/50"
                                                     onDrop={(e) => handleFileDrop(e, video.id)}
-                                                    onDragOver={handleFileDragOver}>
-                                                    <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-gray-700 flex items-center justify-center">
+                                                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+                                                    <div className="w-16 h-16 mb-3 rounded-full bg-gray-700 flex items-center justify-center">
                                                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-400">
                                                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                                                             <polyline points="17 8 12 3 7 8"></polyline>
@@ -562,54 +551,136 @@
                                                     </div>
                                                     <div className="text-gray-300 font-medium">Click or drag to upload</div>
                                                     <div className="text-sm text-gray-500">{video.label}</div>
-                                                    <input type="file" accept="video/*" className="hidden"
-                                                        onChange={(e) => handleFileUpload(e, video.id)} />
+                                                    <input type="file" accept="video/*" className="hidden" onChange={(e) => handleFileUpload(e, video.id)} />
                                                 </label>
                                             )}
                                         </div>
                                     </div>
                                 );
                             })}
-                        </div>
+                            </div>
                         </div>
 
-                        {/* Hover Tooltip */}
-                        {hoverData && (
-                            <div className="fixed z-50 pointer-events-none"
-                                style={{ left: Math.min(hoverPosition.x + 20, window.innerWidth - 280), top: hoverPosition.y + 20 }}>
-                                <div className="bg-gray-800/95 backdrop-blur border border-gray-600 rounded-xl shadow-2xl p-4 min-w-[250px]">
-                                    <div className="text-xs text-gray-400 mb-3 pb-2 border-b border-gray-700 font-medium">
-                                        📊 Data at Cursor
+                        {fullscreenVideoId && (() => {
+                            const video = videos.find(v => v.id === fullscreenVideoId);
+                            if (!video?.src) return null;
+                            return (
+                                <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
+                                    <button onClick={() => setFullscreenVideoId(null)}
+                                        className="absolute top-4 right-4 z-50 p-3 rounded-full bg-gray-800/80 hover:bg-gray-700">
+                                        <ExitFullscreenIcon />
+                                    </button>
+                                    {showNameTags && (
+                                        <div className="absolute top-4 left-4 z-50 px-4 py-2 rounded-full text-base font-bold"
+                                            style={{ backgroundColor: video.color }}>{video.label}</div>
+                                    )}
+                                    <video src={video.src} className="max-w-full max-h-full object-contain"
+                                        ref={el => {
+                                            if (el) {
+                                                const mv = videoRefs.current[video.id];
+                                                if (mv) { el.currentTime = mv.currentTime; el.playbackRate = playbackSpeed; }
+                                                if (isPlaying) el.play().catch(() => {});
+                                            }
+                                        }}
+                                        onTimeUpdate={(e) => {
+                                            const time = e.target.currentTime;
+                                            Object.values(videoRefs.current).forEach(v => {
+                                                if (v && Math.abs(v.currentTime - time) > 0.1) v.currentTime = time;
+                                            });
+                                            setCurrentTime(time);
+                                        }}
+                                        muted playsInline autoPlay={isPlaying} />
+                                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-gray-800/90 px-4 py-2 rounded-full">
+                                        <button onClick={togglePlayPause} className="p-2 hover:bg-gray-700 rounded-full">
+                                            {isPlaying ? <PauseIcon /> : <PlayIcon />}
+                                        </button>
+                                        <span className="text-sm font-mono">{currentTime.toFixed(1)}s / {duration.toFixed(1)}s</span>
+                                        <select value={playbackSpeed} onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
+                                            className="bg-gray-700 text-white text-sm px-2 py-1 rounded">
+                                            <option value={0.25}>0.25x</option><option value={0.5}>0.5x</option>
+                                            <option value={0.75}>0.75x</option><option value={1}>1x</option>
+                                            <option value={1.5}>1.5x</option><option value={2}>2x</option>
+                                        </select>
                                     </div>
-                                    {hoverData.map((item, i) => (
-                                        <div key={i} className="mb-3 last:mb-0">
-                                            <div className="text-sm font-bold mb-1.5 flex items-center gap-2" style={{ color: item.color }}>
-                                                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }}></span>
-                                                {item.label}
-                                            </div>
-                                            <div className="grid grid-cols-3 gap-3 text-xs bg-gray-900/50 rounded-lg p-2">
-                                                <div><div className="text-gray-500">Index</div><div className="font-mono font-bold">{item.data.index}</div></div>
-                                                <div><div className="text-gray-500">Time</div><div className="font-mono font-bold">{item.data.time}</div></div>
-                                                <div><div className="text-gray-500">Position</div><div className="font-mono font-bold">{item.data.position}</div></div>
-                                            </div>
-                                        </div>
-                                    ))}
                                 </div>
-                            </div>
-                        )}
+                            );
+                        })()}
 
-                        {/* Instructions */}
-                        <div className="mt-6 bg-gray-800 rounded-xl p-4 text-sm">
-                            <h3 className="font-bold mb-2">📖 Instructions</h3>
-                            <div className="grid md:grid-cols-3 gap-3 text-gray-400">
-                                <div><span className="text-white">Upload:</span> Click placeholders</div>
-                                <div><span className="text-white">Rearrange:</span> Drag & drop videos</div>
-                                <div><span className="text-white">Overlay:</span> Enable mode, drag onto another</div>
-                                <div><span className="text-white">Data:</span> Hover to see values</div>
-                                <div><span className="text-white">Sync:</span> All videos play together</div>
-                                <div><span className="text-white">Seek:</span> Click progress bar</div>
-                            </div>
-                        </div>
+                        {fullscreenOverlay && (() => {
+                            const { baseVideo, overlayVideo, baseId, overlayId } = fullscreenOverlay;
+                            if (!baseVideo?.src || !overlayVideo?.src) return null;
+                            const topVideoName = isOverlayOnTop ? overlayVideo.label : baseVideo.label;
+                            
+                            return (
+                                <div className="fixed inset-0 z-50 bg-black flex items-center justify-center cursor-pointer"
+                                    onClick={(e) => { if (!flickerMode) setIsOverlayOnTop(prev => !prev); }}>
+                                    <button onClick={(e) => { e.stopPropagation(); setFullscreenOverlay(null); }}
+                                        className="absolute top-4 right-4 z-50 p-3 rounded-full bg-gray-800/80 hover:bg-gray-700">
+                                        <ExitFullscreenIcon />
+                                    </button>
+                                    <div className="absolute top-4 left-4 z-50 px-4 py-2 rounded-lg text-sm font-bold bg-gray-800/90">
+                                        Click to swap • {flickerMode ? 'Flickering' : 'Top'}: {topVideoName}
+                                    </div>
+                                    
+                                    <div className="relative w-full h-full">
+                                        <video src={baseVideo.src} className="video-layer"
+                                            style={{ zIndex: isOverlayOnTop ? 1 : 2, opacity: isOverlayOnTop ? 1 : overlayOpacity }}
+                                            ref={el => {
+                                                if (el) {
+                                                    const mv = videoRefs.current[baseId];
+                                                    if (mv && Math.abs(el.currentTime - mv.currentTime) > 0.1) el.currentTime = mv.currentTime;
+                                                    el.playbackRate = playbackSpeed;
+                                                    if (isPlaying && el.paused) el.play().catch(() => {});
+                                                    if (!isPlaying && !el.paused) el.pause();
+                                                }
+                                            }}
+                                            onTimeUpdate={(e) => {
+                                                const time = e.target.currentTime;
+                                                Object.values(videoRefs.current).forEach(v => {
+                                                    if (v && Math.abs(v.currentTime - time) > 0.1) v.currentTime = time;
+                                                });
+                                                setCurrentTime(time);
+                                            }}
+                                            muted playsInline autoPlay={isPlaying} />
+                                        <video src={overlayVideo.src} className="video-layer"
+                                            style={{ zIndex: isOverlayOnTop ? 2 : 1, opacity: isOverlayOnTop ? overlayOpacity : 1 }}
+                                            ref={el => {
+                                                if (el) {
+                                                    const mv = videoRefs.current[overlayId];
+                                                    if (mv && Math.abs(el.currentTime - mv.currentTime) > 0.1) el.currentTime = mv.currentTime;
+                                                    el.playbackRate = playbackSpeed;
+                                                    if (isPlaying && el.paused) el.play().catch(() => {});
+                                                    if (!isPlaying && !el.paused) el.pause();
+                                                }
+                                            }}
+                                            muted playsInline autoPlay={isPlaying} />
+                                    </div>
+                                    
+                                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-gray-800/90 px-4 py-2 rounded-full"
+                                        onClick={(e) => e.stopPropagation()}>
+                                        <button onClick={togglePlayPause} className="p-2 hover:bg-gray-700 rounded-full">
+                                            {isPlaying ? <PauseIcon /> : <PlayIcon />}
+                                        </button>
+                                        <span className="text-sm font-mono">{currentTime.toFixed(1)}s / {duration.toFixed(1)}s</span>
+                                        <select value={playbackSpeed} onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
+                                            className="bg-gray-700 text-white text-sm px-2 py-1 rounded">
+                                            <option value={0.25}>0.25x</option><option value={0.5}>0.5x</option>
+                                            <option value={0.75}>0.75x</option><option value={1}>1x</option>
+                                            <option value={1.5}>1.5x</option><option value={2}>2x</option>
+                                        </select>
+                                        <div className="flex items-center gap-2 pl-2 border-l border-gray-600">
+                                            <span className="text-xs text-gray-400">Opacity:</span>
+                                            <input type="range" min="0" max="1" step="0.1" value={overlayOpacity}
+                                                onChange={(e) => setOverlayOpacity(parseFloat(e.target.value))} className="w-20" />
+                                        </div>
+                                        <button onClick={() => setFlickerMode(!flickerMode)}
+                                            className={`flex items-center gap-1 px-2 py-1 rounded text-sm ${flickerMode ? 'bg-yellow-600' : 'bg-gray-700'}`}>
+                                            <FlickerIcon />
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })()}
                     </div>
                 </div>
             );
