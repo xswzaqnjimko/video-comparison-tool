@@ -1,6 +1,7 @@
 # Video Comparison Tool
 
 A lightweight, browser-based tool for synchronized multi-video comparison. Perfect for research presentations, A/B testing, and side-by-side analysis.
+Created using Claude Opus 4.5.
 
 ## Features
 
@@ -19,10 +20,6 @@ A lightweight, browser-based tool for synchronized multi-video comparison. Perfe
 2. Open in any modern browser
 3. Upload your videos (click or drag)
 4. Compare!
-
-## Live Demo
-
-[View Demo](https://yourusername.github.io/video-comparison-tool/) *(update with your GitHub Pages URL)*
 
 ## Usage
 
@@ -50,10 +47,12 @@ Simply drag any video panel and drop it onto another to swap positions.
 2. Drag one video onto another
 3. Adjust opacity with the slider
 4. Click "Clear" to reset
+5. *Still working on its UI etc.
 
 ### Hover Data
 
 Hover over any video to see synchronized data labels for all videos at that position.
+*Still working.
 
 ## Hosting
 
