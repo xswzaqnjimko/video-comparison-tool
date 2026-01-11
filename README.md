@@ -15,7 +15,7 @@ Made for research use; encouraged to put it onto GitHub.
 
 ## Quick Start
 
-1. Download `index.html`
+1. Download `video_comparison.html`
 2. Open in any modern browser
 3. Upload your videos (click or drag)
 4. Compare!
