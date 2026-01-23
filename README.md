@@ -55,6 +55,11 @@ Simply drag any video panel and drop it onto another to swap positions.
 5. Click on panel to switch/compare top/bottom video. Or use Flicker mode for auto switching
 6. *Still working on UI etc.
 
+## TODO...
+
+1. [ ] Press Space to pause; frame-by-frame drag-to-play functionality; etc.
+2. etc.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE)
