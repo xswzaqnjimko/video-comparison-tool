@@ -57,8 +57,10 @@ Simply drag any video panel and drop it onto another to swap positions.
 
 ## TODO...
 
-1. [ ] Press Space to pause; frame-by-frame drag-to-play functionality; etc.
-2. [ ] etc.
+1. [ ] Press Space to pause
+2. [ ] Frame-by-frame drag-to-play
+3. [ ] Hover to show data detail...
+4. [ ] etc.
 
 ## License
 
