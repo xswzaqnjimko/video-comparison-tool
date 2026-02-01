@@ -5,9 +5,12 @@ Made for research use; encouraged to put it onto GitHub.
 
 ## Features
 
+V1.4 2026/02/01
+
 - **Synchronized Playback** - All videos play, pause, and seek together
 - **Drag & Rearrange** - Reorder video panels by dragging
 - **Overlay Mode** - Stack videos with adjustable transparency for direct comparison
+- **Zoom Lens** - Hold Shift + hover to magnify video details (2.5x zoom, synchronized across panels)
 - **Auto-Replay** - Loop videos continuously (toggleable)
 - **Flexible Layout** - Support for 1-10 videos with responsive grid
 - **Fullscreen viewing** - Enlarge to better see
@@ -26,13 +29,16 @@ Made for research use; encouraged to put it onto GitHub.
 
 | Button | Function |
 |--------|----------|
-| Videos: [1-10] | Set number of comparison panels (can type directly); auto fits bbulk upload video amount |
+| Videos: [1-10] | Set number of comparison panels (can type directly); auto fits bulk upload video amount |
 | 🗑️ Clear All | Remove all uploaded videos |
 | ▶️ Play/Pause | Start/stop all videos simultaneously |
 | Reset | Return all videos to beginning |
 | 🔁 Loop | Toggle auto-replay on/off |
 | Speed | Playback speed (0.25x - 2x) |
-| 📑 Overlay | Enable overlay mode for stacking videos |
+| 🏷️ Tags | Toggle video name labels on/off |
+| Shift | Hold Shift to view zoom lens (2.5x) |
+| 🔲 Overlay | Enable overlay mode for stacking videos |
+| ⚡ Flicker | In overlay mode, auto-switch between top/bottom video |
 | 🔲 Clear | In overlay mode, remove all overlays |
 
 ### Bulk Upload
@@ -46,6 +52,14 @@ Drag multiple video files at once onto the video grid area. Videos will be:
 
 Simply drag any video panel and drop it onto another to swap positions.
 
+### Zoom Lens
+
+Hold **Shift** while hovering over any video panel to activate the zoom lens:
+- Circular magnifying glass appears at cursor position
+- 2.5x magnification of video content
+- Works in both normal and overlay modes
+- Synchronized position across all panels for easy comparison
+
 ### Overlay Comparison
 
 1. Click "Overlay" button to enable overlay mode
@@ -57,10 +71,11 @@ Simply drag any video panel and drop it onto another to swap positions.
 
 ## TODO...
 
-1. [ ] Press Space to pause
+1. [ ] Press Space to pause, ⬅️/➡️ to adjust, etc.
 2. [ ] Frame-by-frame drag-to-play
-3. [ ] Hover to show data detail...
-4. [ ] etc.
+3. [ ] Adjustable zoom lens scale (e.g. 2x-4x)
+4. [ ] Hover to show data detail...
+5. [ ] etc.
 
 ## License
 

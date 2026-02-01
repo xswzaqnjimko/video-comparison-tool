@@ -81,6 +81,72 @@
             </svg>
         );
 
+        // ZoomLens component - renders zoomed portion of video using canvas
+        const ZoomLens = ({ videoRefs, videoId, overlayVideoId, isOverlayOnTop, overlayOpacity, zoomPosition, zoomScale, hasOverlay }) => {
+            const canvasRef = useRef(null);
+            const animationRef = useRef(null);
+
+            useEffect(() => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                
+                const draw = () => {
+                    const video1 = videoRefs.current[videoId];
+                    const video2 = hasOverlay ? videoRefs.current[overlayVideoId] : null;
+                    
+                    if (!video1) return;
+                    
+                    const lensSize = zoomPosition.width / 3;
+                    canvas.width = lensSize;
+                    canvas.height = lensSize;
+                    
+                    // Calculate source region to zoom
+                    const srcSize = lensSize / zoomScale;
+                    const srcX = (zoomPosition.relX * video1.videoWidth) - (srcSize / 2);
+                    const srcY = (zoomPosition.relY * video1.videoHeight) - (srcSize / 2);
+                    
+                    ctx.clearRect(0, 0, lensSize, lensSize);
+                    
+                    if (hasOverlay && video2) {
+                        // Draw bottom video
+                        const bottomVideo = isOverlayOnTop ? video1 : video2;
+                        ctx.globalAlpha = 1;
+                        ctx.drawImage(bottomVideo, srcX, srcY, srcSize, srcSize, 0, 0, lensSize, lensSize);
+                        
+                        // Draw top video with opacity
+                        const topVideo = isOverlayOnTop ? video2 : video1;
+                        ctx.globalAlpha = overlayOpacity;
+                        ctx.drawImage(topVideo, srcX, srcY, srcSize, srcSize, 0, 0, lensSize, lensSize);
+                    } else {
+                        ctx.drawImage(video1, srcX, srcY, srcSize, srcSize, 0, 0, lensSize, lensSize);
+                    }
+                    
+                    animationRef.current = requestAnimationFrame(draw);
+                };
+                
+                draw();
+                return () => cancelAnimationFrame(animationRef.current);
+            }, [videoRefs, videoId, overlayVideoId, isOverlayOnTop, overlayOpacity, zoomPosition, zoomScale, hasOverlay]);
+
+            const lensSize = zoomPosition.width / 3;
+            
+            return (
+                <div className="absolute pointer-events-none rounded-full border-3 border-white shadow-2xl overflow-hidden"
+                    style={{
+                        width: lensSize,
+                        height: lensSize,
+                        left: zoomPosition.x - lensSize / 2,
+                        top: zoomPosition.y - lensSize / 2,
+                        zIndex: 100,
+                        boxShadow: '0 0 20px rgba(0,0,0,0.5), inset 0 0 10px rgba(255,255,255,0.2)',
+                        border: '3px solid white'
+                    }}>
+                    <canvas ref={canvasRef} className="w-full h-full" style={{ borderRadius: '50%' }} />
+                </div>
+            );
+        };
+
         const VideoComparisonWidget = () => {
             const videoColors = [
                 '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', 
@@ -124,6 +190,32 @@
             
             const videoRefs = useRef({});
             const containerRef = useRef(null);
+
+            // Zoom lens state
+            const zoomScale = 2.5; // Fixed zoom scale
+            const [isShiftPressed, setIsShiftPressed] = useState(false);
+            const [zoomPosition, setZoomPosition] = useState({ x: 0, y: 0, relX: 0, relY: 0 }); // relX/relY are 0-1 normalized
+
+            // Track shift key
+            useEffect(() => {
+                const handleKeyDown = (e) => { if (e.key === 'Shift') setIsShiftPressed(true); };
+                const handleKeyUp = (e) => { if (e.key === 'Shift') setIsShiftPressed(false); };
+                window.addEventListener('keydown', handleKeyDown);
+                window.addEventListener('keyup', handleKeyUp);
+                return () => {
+                    window.removeEventListener('keydown', handleKeyDown);
+                    window.removeEventListener('keyup', handleKeyUp);
+                };
+            }, []);
+
+            const handleVideoMouseMove = (e, videoId) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const relX = x / rect.width;
+                const relY = y / rect.height;
+                setZoomPosition({ x, y, relX, relY, width: rect.width, height: rect.height });
+            };
 
             const handleVideoCountChange = (newCount) => {
                 const count = Math.max(1, Math.min(10, parseInt(newCount) || 2));
@@ -356,7 +448,7 @@
                             <div>
                                 <h1 className="text-xl md:text-2xl font-bold mb-1">🎬 Video Comparison Tool</h1>
                                 <p className="text-gray-400 text-sm">
-                                    {overlayMode ? '🎯 Overlay Mode ON: Drag a video onto another (max 2 videos) • Click/flicker for better contrast • Use the red button to put panels back' : '↔️ Drag to rearrange • Enable Overlay Mode to compare'}
+                                    {overlayMode ? '🎯 Overlay Mode ON: Drag a video onto another (max 2 videos) • Click/flicker for better contrast • Use the red button to put panels back' : '↔️ Drag to rearrange • Hold Shift to zoom • Enable Overlay Mode to compare'}
                                 </p>
                             </div>
                             <a href="https://github.com/xswzaqnjimko/video-comparison-tool" target="_blank" rel="noopener noreferrer"
@@ -521,7 +613,9 @@
                                         )}
 
                                         <div className="aspect-video bg-gray-800 relative"
-                                            onClick={hasOverlay ? handleOverlayClick : undefined}>
+                                            onClick={hasOverlay ? handleOverlayClick : undefined}
+                                            onMouseMove={(e) => handleVideoMouseMove(e, video.id)}
+                                            onMouseLeave={() => setZoomPosition({ x: 0, y: 0, relX: 0, relY: 0 })}>
                                             {video.src ? (
                                                 hasOverlay ? (
                                                     <div className="relative w-full h-full overflow-hidden bg-black">
@@ -540,12 +634,39 @@
                                                             className="video-layer"
                                                             style={{ zIndex: isOverlayOnTop ? 2 : 1, opacity: isOverlayOnTop ? overlayOpacity : 1 }}
                                                             muted playsInline />
+                                                        
+                                                        {/* Zoom lens for overlay */}
+                                                        {isShiftPressed && zoomPosition.width > 0 && (
+                                                            <ZoomLens 
+                                                                videoRefs={videoRefs}
+                                                                videoId={video.id}
+                                                                overlayVideoId={overlayVideo.id}
+                                                                isOverlayOnTop={isOverlayOnTop}
+                                                                overlayOpacity={overlayOpacity}
+                                                                zoomPosition={zoomPosition}
+                                                                zoomScale={zoomScale}
+                                                                hasOverlay={true}
+                                                            />
+                                                        )}
                                                     </div>
                                                 ) : (
-                                                    <video ref={el => { if (el) videoRefs.current[video.id] = el; }} src={video.src}
-                                                        className="w-full h-full object-contain bg-black"
-                                                        onTimeUpdate={handleTimeUpdate} onEnded={handleVideoEnded}
-                                                        onLoadedMetadata={handleLoadedMetadata} muted playsInline />
+                                                    <div className="relative w-full h-full">
+                                                        <video ref={el => { if (el) videoRefs.current[video.id] = el; }} src={video.src}
+                                                            className="w-full h-full object-contain bg-black"
+                                                            onTimeUpdate={handleTimeUpdate} onEnded={handleVideoEnded}
+                                                            onLoadedMetadata={handleLoadedMetadata} muted playsInline />
+                                                        
+                                                        {/* Zoom lens for single video */}
+                                                        {isShiftPressed && zoomPosition.width > 0 && (
+                                                            <ZoomLens 
+                                                                videoRefs={videoRefs}
+                                                                videoId={video.id}
+                                                                zoomPosition={zoomPosition}
+                                                                zoomScale={zoomScale}
+                                                                hasOverlay={false}
+                                                            />
+                                                        )}
+                                                    </div>
                                                 )
                                             ) : (
                                                 <label className="flex flex-col items-center justify-center h-full cursor-pointer hover:bg-gray-700/50"
